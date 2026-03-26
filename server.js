@@ -12,7 +12,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 5000;
 const client = new MongoClient(process.env.MONGO_URI);
 
-let deviceCommand = "IDLE";   // 🔹 stores command state
+let deviceCommand = "IDLE";
 
 async function startServer() {
   try {
@@ -22,80 +22,70 @@ async function startServer() {
     const db = client.db(process.env.DB_NAME);
     const collection = db.collection(process.env.COLLECTION_NAME);
 
-    // ✅ Health check
+    // ==========================
+    // HEALTH CHECK
+    // ==========================
     app.get("/", (req, res) => {
       res.json({ status: "Backend is running ✅" });
     });
 
-    /* =========================================
-       1️⃣ Frontend triggers soil test
-    ========================================== */
+    // ==========================
+    // 1️⃣ START TEST
+    // ==========================
     app.post("/api/start-test", (req, res) => {
       deviceCommand = "START_TEST";
-      console.log('Recieved start cmd');
-      res.json({ message: "✅ Test command sent to device" });
+      console.log("START_TEST triggered");
+      res.json({ message: "Test command sent" });
     });
 
-/* =========================================
-   2️⃣ ESP32 polls for command
-========================================== */
-app.get("/api/device-command", (req, res) => {
-  const current = deviceCommand;
-  
-  // Reset immediately so the next poll returns IDLE
-  deviceCommand = "IDLE"; 
+    // ==========================
+    // 2️⃣ DEVICE POLLING
+    // ==========================
+    app.get("/api/device-command", (req, res) => {
+      res.json({ command: deviceCommand });
 
-  res.json({ command: current });
-  
-  if (current !== "IDLE") {
-    console.log(`Command ${current} picked up by device.`);
-  }
-});
+      if (deviceCommand !== "IDLE") {
+        console.log(`Device polled: ${deviceCommand}`);
+      }
+    });
 
-    /* =========================================
-   3️⃣ ESP32 sends test result
-========================================== */
-app.post("/api/results", async (req, res) => {
-    console.log('--- Incoming Data Debug ---');
-    console.log('Body:', req.body); // Check if this is empty
+    // ==========================
+    // 3️⃣ RECEIVE RESULTS
+    // ==========================
+    app.post("/api/results", async (req, res) => {
 
-    try {
+      console.log("Incoming Data:", req.body);
+
+      try {
         const { Id, metals_detected } = req.body;
 
-        // 1. Validation Check
         if (!Id || !metals_detected) {
-            console.log("❌ Validation failed: Missing fields in JSON");
-            return res.status(400).json({ error: "Missing fields" });
-        }
-
-        // 2. Database Connection Check
-        if (!collection) {
-            console.log("❌ MongoDB Error: Collection object is null or undefined");
-            return res.status(500).json({ error: "Database not initialized" });
+          return res.status(400).json({ error: "Missing fields" });
         }
 
         const doc = {
-            Id,
-            metals_detected,
-            timestamp: new Date(),
+          Id,
+          metals_detected,
+          timestamp: new Date(),
         };
 
-        // 3. Perform Insertion
         const result = await collection.insertOne(doc);
-        
-        console.log("✅ Successfully inserted into MongoDB. ID:", result.insertedId);
 
+        console.log("Inserted:", result.insertedId);
+
+        // 🔥 RESET COMMAND ONLY AFTER RESULT
         deviceCommand = "IDLE";
-        res.json({ message: "✅ Data inserted", id: result.insertedId });
 
-    } catch (err) {
-        console.error("❌ MongoDB Insert Error:", err);
-        res.status(500).json({ error: "Insert failed", details: err.message });
-    }
-});
+        res.json({ message: "Data inserted" });
+
+      } catch (err) {
+        console.error("Insert error:", err);
+        res.status(500).json({ error: "Insert failed" });
+      }
+    });
 
     app.listen(PORT, () => {
-      console.log(`🚀 Server running on http://localhost:${PORT}`);
+      console.log(`🚀 Server running on port ${PORT}`);
     });
 
   } catch (err) {
